@@ -15,7 +15,8 @@ if invoice_number and invoice_number.isdigit() and len(invoice_number) == 6:
         # --- Fetch invoice data ---
         cur.execute("""
             SELECT 
-                invoicenumber, takenby, proofreader, wanteddate, account_id, customerpo, weborderexternalid
+                invoicenumber, takenby, proofreader, wanteddate, account_id, customerpo, weborderexternalid,
+                (SELECT title FROM account WHERE id = invoicebase.account_id) AS customername
             FROM invoicebase
             WHERE invoicenumber = %s
         """, (invoice_number,))
@@ -26,6 +27,8 @@ if invoice_number and invoice_number.isdigit() and len(invoice_number) == 6:
             columns = [desc.name for desc in cur.description]
             for label, value in zip(columns, row):
                 st.write(f"**{label}**: {value}")
+
+            customername = row[-1]  # from subquery result
 
             # --- Assign Project Manager (Taken By) ---
             st.subheader("Assign Project Manager")
@@ -42,6 +45,7 @@ if invoice_number and invoice_number.isdigit() and len(invoice_number) == 6:
                 conn.commit()
                 update_cur.close()
                 st.success(f"✅ Taken By set to {selected_pm}")
+
             # --- Set Proofreader to DSF ---
             st.subheader("Proofreader")
             if st.button("Set Proofreader to DSF"):
@@ -57,19 +61,18 @@ if invoice_number and invoice_number.isdigit() and len(invoice_number) == 6:
                     st.success("✅ Proofreader set to DSF")
                 except Exception as e:
                     st.error(f"Update failed: {e}")
+
             # --- Set Jobbase Location Based on Press/Copier/Method ---
             st.subheader("Assign Job Locations with AI Logic")
 
             if st.button("Auto-Assign Locations"):
                 try:
-                    # Step 1: Mappings
                     machine_location_map = {
                         "B&W Digital Press": 2726,
                         "Digital Color Press": 2723,
                         "Xerox Baltoro": 18697147,
                         "FireJet": 24053172
                     }
-
                     pricing_method_location_map = {
                         "Fulfillment": 22439945,
                         "Multi-part Job": 2733,
@@ -106,15 +109,12 @@ if invoice_number and invoice_number.isdigit() and len(invoice_number) == 6:
 
                     update_cur = conn.cursor()
                     updated_count = 0
-
                     for job_id, press_name, copier_name, pricing_method in jobs:
                         loc_id = determine_location(
                             press_name, copier_name, pricing_method)
                         if loc_id:
                             update_cur.execute(
-                                "UPDATE jobbase SET location_id = %s WHERE id = %s",
-                                (loc_id, job_id)
-                            )
+                                "UPDATE jobbase SET location_id = %s WHERE id = %s", (loc_id, job_id))
                             updated_count += 1
 
                     conn.commit()
@@ -123,9 +123,117 @@ if invoice_number and invoice_number.isdigit() and len(invoice_number) == 6:
 
                     st.success(
                         f"✅ Updated {updated_count} job parts with new location_id values")
-
                 except Exception as e:
                     st.error(f"Location logic update failed: {e}")
+
+            # --- AI-Assisted Description Cleanup ---
+            st.subheader("Clean Job Descriptions")
+
+            if st.button("Clean Up Descriptions"):
+                try:
+                    def clean_description(desc):
+                        if not desc:
+                            return desc
+                        for sep in [" - ", " – ", " — "]:
+                            parts = desc.split(sep)
+                            if len(parts) == 2 and parts[0].strip().lower() == parts[1].strip().lower():
+                                return parts[0].strip()
+                        return desc.strip()
+
+                    fetch_cur = conn.cursor()
+                    fetch_cur.execute("""
+                        SELECT id, description
+                        FROM jobbase
+                        WHERE parentinvoice_id = (
+                            SELECT id FROM invoicebase WHERE invoicenumber = %s
+                        )
+                    """, (invoice_number,))
+                    jobs = fetch_cur.fetchall()
+
+                    update_cur = conn.cursor()
+                    updated = 0
+
+                    for job_id, desc in jobs:
+                        cleaned = clean_description(desc)
+                        if cleaned != desc and cleaned != "":
+                            update_cur.execute(
+                                "UPDATE jobbase SET description = %s WHERE id = %s", (cleaned, job_id))
+                            updated += 1
+
+                    conn.commit()
+                    fetch_cur.close()
+                    update_cur.close()
+
+                    st.success(f"✅ Cleaned {updated} job descriptions")
+                except Exception as e:
+                    st.error(f"Description cleanup failed: {e}")
+
+            # --- Order Stock (simulate GUI button) ---
+            st.subheader("Order Stock")
+
+            if st.button("Place Stock Order for All Parts"):
+                try:
+                    stock_cur = conn.cursor()
+                    stock_cur.execute("""
+                        SELECT 
+                            jobbase.id AS job_id,
+                            jobbase.jobindex AS job_number,
+                            invoicebase.invoicenumber,
+                            stockdefinition.name AS stock_name,
+                            stockdefinition.vendor_id,
+                            stockdefinition.weight
+                        FROM jobbase
+                        INNER JOIN invoicebase ON jobbase.parentinvoice_id = invoicebase.id
+                        INNER JOIN stockdefinition ON jobbase.stock_id = stockdefinition.id
+                        WHERE invoicebase.invoicenumber = %s
+                    """, (invoice_number,))
+                    stock_jobs = stock_cur.fetchall()
+
+                    if not stock_jobs:
+                        st.info("ℹ️ No job parts with stock assigned.")
+                    else:
+                        insert_cur = conn.cursor()
+                        inserted = 0
+
+                        for row in stock_jobs:
+                            job_id, job_number, inv_num, stock_name, vendor_id, weight = row
+                            sheet_size = None
+
+                            insert_cur.execute(
+                                "SELECT nextval('modelbase_id_seq')")
+                            new_id = insert_cur.fetchone()[0]
+
+                            insert_cur.execute("""
+                                INSERT INTO modelbase (id, isdeleted) VALUES (%s, false)
+                            """, (new_id,))
+
+                            insert_cur.execute("""
+                                INSERT INTO stockorder (
+                                    id, customername, filled, invoicenumber, jobnumber, name,
+                                    orderquantity, placed, receivedquantity, sheetsize,
+                                    totalcost, vendorstocknumber, weight, vendor_id,
+                                    color_id, enterdate, rollwidth, stockunit, extraqty,
+                                    rollweight, isdeleted
+                                ) VALUES (
+                                    %s, %s, false, %s, %s, %s,
+                                    500, NULL, NULL, %s,
+                                    0, NULL, %s, %s,
+                                    NULL, NOW(), NULL, 1, NULL,
+                                    0, false
+                                )
+                            """, (new_id, customername, inv_num, job_number, stock_name, sheet_size, weight, vendor_id))
+
+                            inserted += 1
+
+                        conn.commit()
+                        insert_cur.close()
+                        st.success(
+                            f"✅ Stock order(s) placed for {inserted} job part(s).")
+
+                    stock_cur.close()
+
+                except Exception as e:
+                    st.error(f"Stock order insert failed: {e}")
 
         else:
             st.warning("No invoice found with that ID.")
@@ -136,5 +244,6 @@ if invoice_number and invoice_number.isdigit() and len(invoice_number) == 6:
     finally:
         cur.close()
         conn.close()
+
 else:
     st.info("Please enter a valid 6-digit invoice number.")

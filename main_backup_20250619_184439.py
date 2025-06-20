@@ -15,16 +15,13 @@ if invoice_number and invoice_number.isdigit() and len(invoice_number) == 6:
 
     try:
         # --- Fetch invoice data ---
-        cur.execute(
-            """
+        cur.execute("""
             SELECT 
                 invoicenumber, takenby, proofreader, wanteddate, account_id, customerpo, weborderexternalid,
                 (SELECT title FROM account WHERE id = invoicebase.account_id) AS customername
             FROM invoicebase
             WHERE invoicenumber = %s
-        """,
-            (invoice_number,),
-        )
+        """, (invoice_number,))
         row = cur.fetchone()
 
         if row:
@@ -42,14 +39,11 @@ if invoice_number and invoice_number.isdigit() and len(invoice_number) == 6:
 
             if st.button("Assign Taken By"):
                 update_cur = conn.cursor()
-                update_cur.execute(
-                    """
+                update_cur.execute("""
                     UPDATE invoicebase
                     SET takenby = %s
                     WHERE invoicenumber = %s
-                """,
-                    (selected_pm, invoice_number),
-                )
+                """, (selected_pm, invoice_number))
                 conn.commit()
                 update_cur.close()
                 st.success(f"✅ Taken By set to {selected_pm}")
@@ -59,14 +53,11 @@ if invoice_number and invoice_number.isdigit() and len(invoice_number) == 6:
             if st.button("Set Proofreader to DSF"):
                 try:
                     proof_cur = conn.cursor()
-                    proof_cur.execute(
-                        """
+                    proof_cur.execute("""
                         UPDATE invoicebase
                         SET proofreader = 'DSF'
                         WHERE invoicenumber = %s
-                    """,
-                        (invoice_number,),
-                    )
+                    """, (invoice_number,))
                     conn.commit()
                     proof_cur.close()
                     st.success("✅ Proofreader set to DSF")
@@ -82,14 +73,14 @@ if invoice_number and invoice_number.isdigit() and len(invoice_number) == 6:
                         "B&W Digital Press": 2726,
                         "Digital Color Press": 2723,
                         "Xerox Baltoro": 18697147,
-                        "FireJet": 24053172,
+                        "FireJet": 24053172
                     }
                     pricing_method_location_map = {
                         "Fulfillment": 22439945,
                         "Multi-part Job": 2733,
                         "Mail Services": 2713,
                         "Outsource": 21116818,
-                        "Digital Envelope Press": 2731,
+                        "Digital Envelope Press": 2731
                     }
 
                     def determine_location(press, copier, method):
@@ -102,8 +93,7 @@ if invoice_number and invoice_number.isdigit() and len(invoice_number) == 6:
                         return None
 
                     job_cur = conn.cursor()
-                    job_cur.execute(
-                        """
+                    job_cur.execute("""
                         SELECT
                             jobbase.id,
                             pressdefinition.name AS press_name,
@@ -116,22 +106,17 @@ if invoice_number and invoice_number.isdigit() and len(invoice_number) == 6:
                         WHERE jobbase.parentinvoice_id = (
                             SELECT id FROM invoicebase WHERE invoicenumber = %s
                         )
-                    """,
-                        (invoice_number,),
-                    )
+                    """, (invoice_number,))
                     jobs = job_cur.fetchall()
 
                     update_cur = conn.cursor()
                     updated_count = 0
                     for job_id, press_name, copier_name, pricing_method in jobs:
                         loc_id = determine_location(
-                            press_name, copier_name, pricing_method
-                        )
+                            press_name, copier_name, pricing_method)
                         if loc_id:
                             update_cur.execute(
-                                "UPDATE jobbase SET location_id = %s WHERE id = %s",
-                                (loc_id, job_id),
-                            )
+                                "UPDATE jobbase SET location_id = %s WHERE id = %s", (loc_id, job_id))
                             updated_count += 1
 
                     conn.commit()
@@ -139,8 +124,7 @@ if invoice_number and invoice_number.isdigit() and len(invoice_number) == 6:
                     job_cur.close()
 
                     st.success(
-                        f"✅ Updated {updated_count} job parts with new location_id values"
-                    )
+                        f"✅ Updated {updated_count} job parts with new location_id values")
                 except Exception as e:
                     st.error(f"Location logic update failed: {e}")
 
@@ -149,30 +133,23 @@ if invoice_number and invoice_number.isdigit() and len(invoice_number) == 6:
 
             if st.button("Clean Up Descriptions"):
                 try:
-
                     def clean_description(desc):
                         if not desc:
                             return desc
                         for sep in [" - ", " – ", " — "]:
                             parts = desc.split(sep)
-                            if (
-                                len(parts) == 2
-                                and parts[0].strip().lower() == parts[1].strip().lower()
-                            ):
+                            if len(parts) == 2 and parts[0].strip().lower() == parts[1].strip().lower():
                                 return parts[0].strip()
                         return desc.strip()
 
                     fetch_cur = conn.cursor()
-                    fetch_cur.execute(
-                        """
+                    fetch_cur.execute("""
                         SELECT id, description
                         FROM jobbase
                         WHERE parentinvoice_id = (
                             SELECT id FROM invoicebase WHERE invoicenumber = %s
                         )
-                    """,
-                        (invoice_number,),
-                    )
+                    """, (invoice_number,))
                     jobs = fetch_cur.fetchall()
 
                     update_cur = conn.cursor()
@@ -182,9 +159,7 @@ if invoice_number and invoice_number.isdigit() and len(invoice_number) == 6:
                         cleaned = clean_description(desc)
                         if cleaned != desc and cleaned != "":
                             update_cur.execute(
-                                "UPDATE jobbase SET description = %s WHERE id = %s",
-                                (cleaned, job_id),
-                            )
+                                "UPDATE jobbase SET description = %s WHERE id = %s", (cleaned, job_id))
                             updated += 1
 
                     conn.commit()
@@ -200,15 +175,12 @@ if invoice_number and invoice_number.isdigit() and len(invoice_number) == 6:
 
             if st.button("Generate Invoice Title from Job Codes"):
                 try:
-                    cur.execute(
-                        """
+                    cur.execute("""
                         SELECT jobbase.description
                         FROM jobbase
                         INNER JOIN invoicebase ON jobbase.parentinvoice_id = invoicebase.id
                         WHERE invoicebase.invoicenumber = %s
-                    """,
-                        (invoice_number,),
-                    )
+                    """, (invoice_number,))
                     descs = cur.fetchall()
                     codes = set()
 
@@ -217,8 +189,7 @@ if invoice_number and invoice_number.isdigit() and len(invoice_number) == 6:
                             return None
                         clean = re.split(r"\s*[-–—]\s*", desc)[0].strip()
                         match = re.match(
-                            r"^([A-Z]{2,5}\d{2,5}[A-Z]?)(?:[_\s\-]|$)", clean
-                        )
+                            r"^([A-Z]{2,5}\d{2,5}[A-Z]?)(?:[_\s\-]|$)", clean)
                         return match.group(1) if match else clean
 
                     for row in descs:
@@ -228,13 +199,10 @@ if invoice_number and invoice_number.isdigit() and len(invoice_number) == 6:
 
                     if len(codes) > 1:
                         code_str = ", ".join(sorted(codes))
-                        cur.execute(
-                            """
+                        cur.execute("""
                             UPDATE invoicebase SET name = %s
                             WHERE invoicenumber = %s
-                        """,
-                            (code_str, invoice_number),
-                        )
+                        """, (code_str, invoice_number))
                         conn.commit()
                         st.success(f"✅ Invoice title updated to: {code_str}")
                     else:
@@ -249,8 +217,7 @@ if invoice_number and invoice_number.isdigit() and len(invoice_number) == 6:
                 if st.button("Place Stock Order for All Parts"):
                     try:
                         stock_cur = conn.cursor()
-                        stock_cur.execute(
-                            """
+                        stock_cur.execute("""
                             SELECT 
                                 jobbase.id AS job_id,
                                 jobbase.jobindex AS job_number,
@@ -262,9 +229,7 @@ if invoice_number and invoice_number.isdigit() and len(invoice_number) == 6:
                             INNER JOIN invoicebase ON jobbase.parentinvoice_id = invoicebase.id
                             INNER JOIN stockdefinition ON jobbase.stock_id = stockdefinition.id
                             WHERE invoicebase.invoicenumber = %s
-                        """,
-                            (invoice_number,),
-                        )
+                        """, (invoice_number,))
                         stock_jobs = stock_cur.fetchall()
 
                         if not stock_jobs:
@@ -274,25 +239,16 @@ if invoice_number and invoice_number.isdigit() and len(invoice_number) == 6:
                             inserted = 0
 
                             for row in stock_jobs:
-                                (
-                                    job_id,
-                                    job_number,
-                                    inv_num,
-                                    stock_name,
-                                    vendor_id,
-                                    weight,
-                                ) = row
+                                job_id, job_number, inv_num, stock_name, vendor_id, weight = row
                                 sheet_size = None
 
-                                insert_cur.execute("SELECT nextval('modelbase_id_seq')")
+                                insert_cur.execute(
+                                    "SELECT nextval('modelbase_id_seq')")
                                 new_id = insert_cur.fetchone()[0]
                                 insert_cur.execute(
-                                    "INSERT INTO modelbase (id, isdeleted) VALUES (%s, false)",
-                                    (new_id,),
-                                )
+                                    "INSERT INTO modelbase (id, isdeleted) VALUES (%s, false)", (new_id,))
 
-                                insert_cur.execute(
-                                    """
+                                insert_cur.execute("""
                                     INSERT INTO stockorder (
                                         id, customername, filled, invoicenumber, jobnumber, name,
                                         orderquantity, placed, receivedquantity, sheetsize, totalcost,
@@ -304,25 +260,14 @@ if invoice_number and invoice_number.isdigit() and len(invoice_number) == 6:
                                         NULL, %s, %s, NULL, NOW(),
                                         NULL, 1, NULL, 0, false
                                     )
-                                """,
-                                    (
-                                        new_id,
-                                        customername,
-                                        inv_num,
-                                        job_number,
-                                        stock_name,
-                                        sheet_size,
-                                        weight,
-                                        vendor_id,
-                                    ),
-                                )
+                                """, (new_id, customername, inv_num, job_number, stock_name,
+                                      sheet_size, weight, vendor_id))
                                 inserted += 1
 
                             conn.commit()
                             insert_cur.close()
                             st.success(
-                                f"✅ Stock order(s) placed for {inserted} job part(s)."
-                            )
+                                f"✅ Stock order(s) placed for {inserted} job part(s).")
 
                         stock_cur.close()
                     except Exception as e:

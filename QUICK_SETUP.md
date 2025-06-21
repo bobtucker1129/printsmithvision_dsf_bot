@@ -64,6 +64,27 @@ black --version
 streamlit run main.py
 ```
 
+### **7. Push Changes to Git and Update Streamlit Cloud**
+
+```bash
+# Ensure your virtual environment is activated
+source venv/bin/activate  # On Mac/Linux
+# or
+venv\Scripts\activate     # On Windows
+
+# Add changes to git
+git add .
+
+# Commit changes with a meaningful message
+git commit -m "Your commit message here"
+
+# Push changes to the remote repository
+git push origin main
+
+# Streamlit Cloud should automatically detect changes and redeploy the app.
+# If not, you may need to manually trigger a redeployment from the Streamlit Cloud dashboard.
+```
+
 ## ✅ **Verification Checklist**
 
 - [ ] Virtual environment activated
@@ -73,6 +94,7 @@ streamlit run main.py
 - [ ] Cursor extensions installed
 - [ ] Format on save enabled
 - [ ] Database connection working
+- [ ] Changes pushed to Git and Streamlit Cloud updated
 
 ## 🔧 **Current Project Tools**
 

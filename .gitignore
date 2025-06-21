@@ -11,3 +11,5 @@ venv/
 
 # macOS
 .DS_Store
+
+.cursor-api-key
